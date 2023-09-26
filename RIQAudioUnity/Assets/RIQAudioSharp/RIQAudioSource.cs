@@ -1,7 +1,8 @@
 using UnityEngine;
 
-namespace RIQAudio.Unity
+namespace RIQAudioUnity.Unity
 {
+    // Test
     public class RIQAudioSource : MonoBehaviour
     {
         public string testFileLoc;
@@ -9,28 +10,25 @@ namespace RIQAudio.Unity
 
         private void Start()
         {
-            testFileLoc = Application.streamingAssetsPath + "/mudstep_atomicbeats_old.wav";
+            RIQAudio.RiqInitAudioDevice();
 
-            RIQDLL.RiqInitAudioDevice();
+            testFileLoc = Application.streamingAssetsPath + "/" + testFileLoc;
 
-            // Should return true if RiqInitAudioDevice worked.
-            Debug.Log(RIQDLL.IsRiqReady());
-
-            soundtest = RIQDLL.RiqLoadSound(Application.streamingAssetsPath + "/hit.ogg");
+            soundtest = RIQAudio.RiqLoadSound(testFileLoc);
         }
 
         private void Update()
         {
             if (Input.GetMouseButtonDown(0))
             {
-                RIQDLL.RiqPlaySound(soundtest);
+                RIQAudio.RiqPlaySound(soundtest);
             }
         }
 
         private void OnDestroy()
         {
-            RIQDLL.RiqUnloadSound(soundtest);
-            RIQDLL.RiqCloseAudioDevice();
+            RIQAudio.RiqUnloadSound(soundtest);
+            RIQAudio.RiqCloseAudioDevice();
         }
     }
 }

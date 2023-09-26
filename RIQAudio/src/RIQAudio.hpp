@@ -30,6 +30,8 @@
 #pragma region Types and structures definitions
 // ================================================================================
 
+typedef void (*AudioCallback)(void* bufferdata, unsigned int frames);
+
 // Enums --------------------------------------------------------------------------
 
 typedef enum
@@ -147,8 +149,6 @@ typedef struct Music
 // ================================================================================
 #pragma endregion
 // ================================================================================
-
-typedef void (*AudioCallback)(void* bufferdata, unsigned int frames);
 
 AudioBuffer* LoadAudioBuffer(ma_format format, ma_uint32 channels, ma_uint32 sampleRate, ma_uint32 sizeInFrames, int usage);
 void UnloadAudioBuffer(AudioBuffer* buffer);
