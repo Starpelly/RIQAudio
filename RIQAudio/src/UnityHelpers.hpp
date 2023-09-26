@@ -11,59 +11,54 @@
 #include "IUnityInterface.h"
 #include "IUnityLog.h"
 
-//for holding the reference ptr until plugin unloads
+// For holding the reference pointer until plugin unloads
 static IUnityLog* unityLogPtr = nullptr;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+extern "C"
+{
+	// Formats a char array like printf
+	char* Pelly_FormatString(const char* fmt, ...)
+	{
+		va_list args;
+		size_t len;
+		char* space;
 
-    // Formats a char array like printf
-    char* Pelly_FormatString(const char* fmt, ...)
-    {
-        va_list args;
-        size_t len;
-        char* space;
+		va_start(args, fmt);
+		len = vsnprintf(0, 0, fmt, args);
+		va_end(args);
 
-        va_start(args, fmt);
-        len = vsnprintf(0, 0, fmt, args);
-        va_end(args);
+		if ((space = (char*)malloc(len + 1)) != 0)
+		{
+			va_start(args, fmt);
+			vsnprintf(space, len + 1, fmt, args);
+			va_end(args);
+			return space;
+			free(space);
+		}
+		else
+		{
+			// well shit?
+		}
 
-        if ((space = (char*)malloc(len + 1)) != 0)
-        {
-            va_start(args, fmt);
-            vsnprintf(space, len + 1, fmt, args);
-            va_end(args);
-            return space;
-            free(space);
-        }
-        else
-        {
-            // well shit?
-        }
+		return NULL;
+	}
 
-        return NULL;
-    }
+	//function will get called by unity when it loads the plugin automatically
+	UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfacesPtr)
+	{
+		//Get the unity log pointer once the Unity plugin gets loaded
+		unityLogPtr = unityInterfacesPtr->Get<IUnityLog>();
 
-    //function will get called by unity when it loads the plugin automatically
-    UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API UnityPluginLoad(IUnityInterfaces* unityInterfacesPtr)
-    {
-        //Get the unity log pointer once the Unity plugin gets loaded
-        unityLogPtr = unityInterfacesPtr->Get<IUnityLog>();
+		
+	}
 
-        
-    }
-
-    //function will get called by unity when it un-loads the plugin automatically
-    UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API UnityPluginUnload()
-    {
-        //Clearing the log ptr on unloading the plugin
-        unityLogPtr = nullptr;
-    }
-
-#ifdef __cplusplus
+	//function will get called by unity when it un-loads the plugin automatically
+	UNITY_INTERFACE_EXPORT void UNITY_INTERFACE_API UnityPluginUnload()
+	{
+		//Clearing the log ptr on unloading the plugin
+		unityLogPtr = nullptr;
+	}
 }
-#endif
 
 #define FORMAT(MESSAGE) std::string("[" + std::string(__FILE__) + ":" + std::to_string(__LINE__) + "] " + MESSAGE).c_str()
 
