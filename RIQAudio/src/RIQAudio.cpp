@@ -1,7 +1,21 @@
-#include <stdbool.h>
-
 #include "RIQAudio.hpp"
 #include "UnityHelpers.hpp"
+
+// Rust users cry
+#ifndef RIQ_MALLOC
+    #define RIQ_MALLOC(sz)          malloc(sz);
+#endif
+#ifndef RIQ_CALLOC
+    #define RIQ_CALLOC(n,sz)        calloc(n,sz)
+#endif
+#ifndef RIQ_REALLOC
+    #define RIQ_REALLOC(ptr,sz)     realloc(ptr,sz)
+#endif
+#ifndef RIQ_FREE
+    #define RIQ_FREE(ptr)           free(ptr)
+#endif
+
+#pragma region File Formats
 
 #define SUPPORT_FILEFORMAT_OGG
 #define SUPPORT_FILEFORMAT_WAV
@@ -11,14 +25,16 @@
 #include "miniaudio/extras/stb_vorbis.h" // Vorbis decoding
 #endif
 
-/*#if defined(SUPPORT_FILEFORMAT_WAV)
-    #define DRWAV_MALLOC RL_MALLOC
-    #define DRWAV_REALLOC RL_REALLOC
-    #define DRWAV_FREE RL_FREE
+#if defined(SUPPORT_FILEFORMAT_WAV)
+    #define DRWAV_MALLOC RIQ_MALLOC
+    #define DRWAV_REALLOC RIQ_REALLOC
+    #define DRWAV_FREE RIQ_FREE
 
     #define DR_WAV_IMPLEMENTATION
-    #include "miniaudio/external/dr_wav.h" // WAV decoding
-#endif*/
+    #include "miniaudio/extras/dr_wav.h" // WAV decoding
+#endif
+
+#pragma endregion
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio/miniaudio.h"
@@ -114,7 +130,7 @@ void RiqCloseAudioDevice(void)
 
         AUDIO.System.isReady = false;
 
-        free(AUDIO.System.pcmBuffer);
+        RIQ_FREE(AUDIO.System.pcmBuffer);
 
         DEBUG_LOG(unityLogPtr, "RIQAudio: Device closed successfully!");
     }
@@ -127,7 +143,7 @@ void RiqCloseAudioDevice(void)
 
 AudioBuffer* LoadAudioBuffer(ma_format format, ma_uint32 channels, ma_uint32 sampleRate, ma_uint32 sizeInFrames, int usage)
 {
-    AudioBuffer* audioBuffer = (AudioBuffer*)calloc(1, sizeof(AudioBuffer));
+    AudioBuffer* audioBuffer = (AudioBuffer*)RIQ_CALLOC(1, sizeof(AudioBuffer));
 
     if (audioBuffer == NULL)
     {
@@ -135,7 +151,7 @@ AudioBuffer* LoadAudioBuffer(ma_format format, ma_uint32 channels, ma_uint32 sam
         return NULL;
     }
 
-    if (sizeInFrames > 0) audioBuffer->data = (unsigned char*)calloc(sizeInFrames * channels * ma_get_bytes_per_sample(format), 1);
+    if (sizeInFrames > 0) audioBuffer->data = (unsigned char*)RIQ_CALLOC(sizeInFrames * channels * ma_get_bytes_per_sample(format), 1);
 
     // Audio data runs through a format converter
     ma_data_converter_config converterConfig = ma_data_converter_config_init(format, AUDIO_DEVICE_FORMAT, channels, AUDIO_DEVICE_CHANNELS, sampleRate, AUDIO.System.device.sampleRate);
@@ -146,7 +162,7 @@ AudioBuffer* LoadAudioBuffer(ma_format format, ma_uint32 channels, ma_uint32 sam
     if (result != MA_SUCCESS)
     {
         DEBUG_WARNING(unityLogPtr, "AUDIO: Failed to create data conversion pipeline");
-        free(audioBuffer);
+        RIQ_FREE(audioBuffer);
         return NULL;
     }
 
@@ -182,8 +198,8 @@ void UnloadAudioBuffer(AudioBuffer* buffer)
     {
         ma_data_converter_uninit(&buffer->converter, NULL);
         UntrackAudioBuffer(buffer);
-        free(buffer->data);
-        free(buffer);
+        RIQ_FREE(buffer->data);
+        RIQ_FREE(buffer);
     }
 }
 
@@ -270,11 +286,11 @@ void UntrackAudioBuffer(AudioBuffer* buffer)
 
 Sound RiqLoadSound(const char* filePath)
 {
-    Wave wave = LoadWave(filePath);
+    Wave wave = RiqLoadWave(filePath);
 
     Sound sound = RiqLoadSoundFromWave(wave);
 
-    UnloadWave(wave);
+    RiqUnloadWave(wave);
 
     return sound;
 }
@@ -286,6 +302,15 @@ Sound RiqLoadSoundFromWave(Wave wave)
 
     if (wave.data != NULL)
     {
+		// When using miniaudio we need to do our own mixing.
+		// To simplify this we need convert the format of each sound to be consistent with
+		// the format used to open the playback AUDIO.System.device. We can do this two ways:
+		//
+		//   1) Convert the whole sound in one go at load time (here).
+		//   2) Convert the audio data in chunks at mixing time.
+		//
+		// First option has been selected, format conversion is done on the loading stage.
+		// The downside is that it uses more memory if the original sound is u8 or s16.
         ma_format formatIn = ((wave.sampleSize == 8) ? ma_format_u8 : ((wave.sampleSize == 16) ? ma_format_s16 : ma_format_f32));
         ma_uint32 frameCountIn = wave.frameCount;
 
@@ -296,7 +321,7 @@ Sound RiqLoadSoundFromWave(Wave wave)
         if (audioBuffer == NULL)
         {
             DEBUG_WARNING(unityLogPtr, "SOUND: Failed to create buffer");
-            return sound;
+            return sound; // Early return to avoid dereferencing the audioBuffer null pointer.
         }
 
         frameCount = (ma_uint32)ma_convert_frames(audioBuffer->data, frameCount, AUDIO_DEVICE_FORMAT, AUDIO_DEVICE_CHANNELS, AUDIO.System.device.sampleRate, wave.data, frameCountIn, formatIn, wave.channels, wave.sampleRate);
@@ -327,57 +352,83 @@ void RiqPlaySound(Sound sound)
 
 #pragma region Wave
 
-Wave LoadWave(const char* filePath)
+Wave RiqLoadWave(const char* filePath)
 {
     Wave wave = { 0 };
 
     unsigned int fileSize = 0;
     unsigned char* fileData = LoadFileData(filePath, &fileSize);
 
-    if (fileData != NULL) wave = LoadWaveFromMemory(fileData, fileSize);
+    if (fileData != NULL) wave = RiqLoadWaveFromMemory(GetFileExtension(filePath), fileData, fileSize);
 
-    free(fileData);
+    RIQ_FREE(fileData);
 
     return wave;
 }
 
-Wave LoadWaveFromMemory(const unsigned char* fileData, int dataSize)
+Wave RiqLoadWaveFromMemory(const char* fileType, const unsigned char* fileData, int dataSize)
 {
     Wave wave = { 0 };
 
-    stb_vorbis* oggData = stb_vorbis_open_memory((unsigned char*)fileData, dataSize, NULL, NULL);
-
-    if (oggData != NULL)
+    if (false) {}
+#if defined(SUPPORT_FILEFORMAT_WAV)
+    else if (strcmp(fileType, ".wav") == 0)
     {
-        stb_vorbis_info info = stb_vorbis_get_info(oggData);
+		drwav wav = { 0 };
+		bool success = drwav_init_memory(&wav, fileData, dataSize, NULL);
 
-        wave.sampleRate = info.sample_rate;
-        wave.sampleSize = 16;
-        wave.channels = info.channels;
-        wave.frameCount = (unsigned int)stb_vorbis_stream_length_in_samples(oggData);
-        wave.data = (short*)malloc(wave.frameCount * wave.channels * sizeof(short));
+		if (success)
+		{
+			wave.frameCount = (unsigned int)wav.totalPCMFrameCount;
+			wave.sampleRate = wav.sampleRate;
+			wave.sampleSize = 16;
+			wave.channels = wav.channels;
+			wave.data = (short*)RIQ_MALLOC(wave.frameCount * wave.channels * sizeof(short));
 
-        stb_vorbis_get_samples_short_interleaved(oggData, info.channels, (short*)wave.data, wave.frameCount * wave.channels);
-        stb_vorbis_close(oggData);
+			// NOTE: We are forcing conversion to 16bit sample size on reading
+			drwav_read_pcm_frames_s16(&wav, wav.totalPCMFrameCount, (drwav_int16*)wave.data);
+		}
+		else DEBUG_WARNING(unityLogPtr, "WAVE: Failed to load WAV data!");
+
+		drwav_uninit(&wav);
     }
-    else
-        DEBUG_WARNING(unityLogPtr, "WAVE: Failed to load OGG data!");
+#endif
+#if defined(SUPPORT_FILEFORMAT_OGG)
+    else if (strcmp(fileType, ".ogg") == 0)
+    {
+        stb_vorbis* oggData = stb_vorbis_open_memory((unsigned char*)fileData, dataSize, NULL, NULL);
+
+        if (oggData != NULL)
+        {
+            stb_vorbis_info info = stb_vorbis_get_info(oggData);
+
+            wave.sampleRate = info.sample_rate;
+            wave.sampleSize = 16;
+            wave.channels = info.channels;
+            wave.frameCount = (unsigned int)stb_vorbis_stream_length_in_samples(oggData);
+            wave.data = (short*)RIQ_MALLOC(wave.frameCount * wave.channels * sizeof(short));
+
+            stb_vorbis_get_samples_short_interleaved(oggData, info.channels, (short*)wave.data, wave.frameCount * wave.channels);
+            stb_vorbis_close(oggData);
+        }
+        else DEBUG_WARNING(unityLogPtr, "WAVE: Failed to load OGG data!");
+    }
+#endif
+    else DEBUG_WARNING(unityLogPtr, "WAVE: Data format not supported!");
 
     DEBUG_LOG_FMT(unityLogPtr, "WAVE: Data loaded successfully (%i Hz, %i bit, %i channels)", wave.sampleRate, wave.sampleSize, wave.channels);
 
     return wave;
 }
 
-void UnloadWave(Wave wave)
+void RiqUnloadWave(Wave wave)
 {
-    free(wave.data);
+    RIQ_FREE(wave.data);
 }
 
 #pragma endregion
 
 #pragma region rAudioFunctions
-
-// NOTE: Taken directly from raudio.h
 
 // Main mixing function, pretty simple in this project, just an accumulation
 // NOTE: framesOut is both an input and an output, it is initially filled with zeros outside of this function
@@ -660,6 +711,17 @@ static void OnSendAudioDataToDevice(ma_device* pDevice, void* pFramesOut, const 
     ma_mutex_unlock(&AUDIO.System.lock);
 }
 
+// Get pointer to extension for a filename string (includes the dot: .png)
+static const char* GetFileExtension(const char* fileName)
+{
+	const char* dot = strrchr(fileName, '.');
+
+	if (!dot || dot == fileName) return NULL;
+
+	return dot;
+}
+
+// Load data from file into a buffer
 static unsigned char* LoadFileData(const char* fileName, unsigned int* bytesRead)
 {
     unsigned char* data = NULL;
@@ -679,7 +741,7 @@ static unsigned char* LoadFileData(const char* fileName, unsigned int* bytesRead
 
             if (size > 0)
             {
-                data = (unsigned char*)malloc(size * sizeof(unsigned char));
+                data = (unsigned char*)RIQ_MALLOC(size * sizeof(unsigned char));
 
                 // NOTE: fread() returns number of read elements instead of bytes, so we read [1 byte, size elements]
                 unsigned int count = (unsigned int)fread(data, sizeof(unsigned char), size, file);

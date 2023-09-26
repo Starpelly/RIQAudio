@@ -43,17 +43,6 @@ typedef enum
 
 typedef enum
 {
-    LOG_ALL = 0,
-    LOG_TRACE,
-    LOG_DEBUG,
-    LOG_INFO,
-    LOG_WARNING,
-    LOG_ERROR,
-    LOG_FATAL,
-    LOG_NONE
-} TraceLogLevel;
-
-typedef enum {
     AUDIO_BUFFER_USAGE_STATIC = 0,
     AUDIO_BUFFER_USAGE_STREAM
 } AudioBufferUsage;
@@ -62,54 +51,55 @@ typedef enum {
 
 typedef struct riqAudioProcessor
 {
-    AudioCallback process;
-    riqAudioProcessor* next;
-    riqAudioProcessor* prev;
+    AudioCallback process;          // Processor callback function
+    riqAudioProcessor* next;        // Next audio processor on the list
+    riqAudioProcessor* prev;        // Previous audio processor on the list
 } riqAudioProcessor;
 
-typedef struct riqAudioBuffer
+struct riqAudioBuffer
 {
-    ma_data_converter converter;
+	ma_data_converter converter;    // Audio data converter
 
-    AudioCallback callback;
-    riqAudioProcessor* processor;
+	AudioCallback callback;         // Audio buffer callback for buffer filling on audio threads
+	riqAudioProcessor* processor;   // Audio processor
 
-    float volume;
-    float pitch;
-    float pan;
+	float volume;                   // Audio buffer volume
+	float pitch;                    // Audio buffer pitch
+	float pan;                      // Audio buffer pan (0.0f to 1.0f)
 
-    bool playing;
-    bool paused;
-    bool looping;
-    int usage;
+	bool playing;                   // Audio buffer state: AUDIO_PLAYING
+	bool paused;                    // Audio buffer state: AUDIO_PAUSED
+	bool looping;                   // Audio buffer looping, default to true for AudioStreams
+	int usage;                      // Audio buffer usage mode: STATIC or STREAM
 
-    bool isSubBufferProcessed[2];
-    unsigned int sizeInFrames;
-    unsigned int frameCursorPos;
-    unsigned int framesProcessed;
+	bool isSubBufferProcessed[2];   // SubBuffer processed (virtual double buffer)
+	unsigned int sizeInFrames;      // Total buffer size in frames
+	unsigned int frameCursorPos;    // Frame cursor position
+	unsigned int framesProcessed;   // Total frames processed in this buffer (required for play timing)
 
-    unsigned char* data;
+	unsigned char* data;            // Data buffer, on music stream keeps filling
 
-    riqAudioBuffer* next;
-    riqAudioBuffer* prev;
-} riqAudioBuffer;
+	riqAudioBuffer* next;           // Next audio buffer on the list
+    riqAudioBuffer* prev;           // Previous audio buffer on the list
+};
 
 
 typedef struct AudioStream
 {
-    riqAudioBuffer* buffer;
-    riqAudioProcessor* processor;
+    riqAudioBuffer* buffer;         // Pointer to internal data used by the audio system
+    riqAudioProcessor* processor;   // Pointer to internal data processor, useful for audio effects
 
-    unsigned int sampleRate;
-    unsigned int sampleSize;
-    unsigned int channels;
+    unsigned int sampleRate;        // Frequency (samples per second)
+    unsigned int sampleSize;        // Bit depth (bits per sample): 8, 16, 32 (24 not supported)
+    unsigned int channels;          // Number of channels (1-mono, 2-stereo, ...)
 } AudioStream;
 
 typedef riqAudioBuffer AudioBuffer;
 
 typedef struct AudioData
 {
-    struct {
+    struct 
+    {
         ma_context context;         // miniaudio context data
         ma_device device;           // miniaudio device
         ma_mutex lock;              // miniaudio mutex lock
@@ -117,7 +107,8 @@ typedef struct AudioData
         size_t pcmBufferSize;       // Pre-allocated buffer size
         void* pcmBuffer;            // Pre-allocated buffer to read audio data from file/memory
     } System;
-    struct {
+    struct
+    {
         AudioBuffer* first;         // Pointer to first AudioBuffer in the list
         AudioBuffer* last;          // Pointer to last AudioBuffer in the list
         int defaultSize;            // Default audio buffer size for audio streams
@@ -126,8 +117,9 @@ typedef struct AudioData
 
 } AudioData;
 
-
-typedef struct Wave {
+// Audio wave data
+typedef struct Wave
+{
     unsigned int frameCount;
     unsigned int sampleRate;
     unsigned int sampleSize;
@@ -135,19 +127,28 @@ typedef struct Wave {
     void* data;
 } Wave;
 
-typedef struct Sound {
+// Sound effects
+typedef struct Sound
+{
     AudioStream stream;
     unsigned int frameCount;
 } Sound;
+
+// Music, audio stream, anything longer than ~10 seconds should be streamed
+typedef struct Music
+{
+    AudioStream stream;
+    unsigned int frameCount;
+    bool looping;
+
+    int ctxType;                // Type of music context (audio filetype)
+    void* ctxData;              // Audio context data, depends on type
+} Music;
 
 // ================================================================================
 //
 // ================================================================================
 
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 AudioBuffer* LoadAudioBuffer(ma_format format, ma_uint32 channels, ma_uint32 sampleRate, ma_uint32 sizeInFrames, int usage);
 void UnloadAudioBuffer(AudioBuffer* buffer);
@@ -163,6 +164,9 @@ void ResumeAudioBuffer(AudioBuffer* buffer);
 void TrackAudioBuffer(AudioBuffer* buffer);
 void UntrackAudioBuffer(AudioBuffer* buffer);
 
+extern "C"
+{
+
 DllExport void RiqInitAudioDevice(void);
 DllExport void RiqCloseAudioDevice(void);
 DllExport bool IsRiqReady();
@@ -173,12 +177,11 @@ DllExport void RiqUnloadSound(Sound sound);
 DllExport void RiqPlaySound(Sound sound);
 
 
-Wave LoadWave(const char* filePath);
-Wave LoadWaveFromMemory(const unsigned char* fileData, int dataSize);
-void UnloadWave(Wave wave);
+DllExport Wave RiqLoadWave(const char* filePath);
+DllExport Wave RiqLoadWaveFromMemory(const char* fileType, const unsigned char* fileData, int dataSize);
+DllExport void RiqUnloadWave(Wave wave);
 
-#ifdef __cplusplus
 }
-#endif
 
+static const char* GetFileExtension(const char* fileName);
 unsigned char* LoadFileData(const char* fileName, unsigned int* bytesRead);
